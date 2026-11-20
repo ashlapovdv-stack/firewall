@@ -1,0 +1,10 @@
+<resources>
+    <color name="secondary_text">#4D5968</color>
+    <color name="tab_active_text">#214774</color>
+    <color name="tab_active_background">#E3EEFF</color>
+    <color name="rule_divider">#E3E7EC</color>
+    <color name="rule_allowed_background">#D3F1DD</color>
+    <color name="rule_denied_background">#F8DADB</color>
+    <color name="rule_mixed_background">#FFEBAD</color>
+    <color name="rule_excluded_background">#E9DDF9</color>
+</resources>

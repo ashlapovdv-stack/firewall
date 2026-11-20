@@ -1,23 +1,35 @@
 package ru.firewall;
 
 import android.app.Activity;
+import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Insets;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.Editable;
+import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
+import android.view.WindowInsetsController;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.BaseAdapter;
+import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
+import android.widget.ScrollView;
+import android.widget.Switch;
 import android.widget.TextView;
 
 import java.text.Collator;
@@ -33,7 +45,11 @@ import ru.firewall.policy.NetworkRules;
 import ru.firewall.policy.NetworkType;
 
 public final class MainActivity extends Activity {
-    private record InstalledApp(String label, String packageName, boolean system) {}
+    private static final int RULE_COLUMN_WIDTH = 48;
+    private static final int LIST_PADDING = 12;
+    private static final String SHOW_SYSTEM_APPS = "show_system_apps";
+
+    private record InstalledApp(String label, String packageName, String description, boolean system) {}
 
     private final ExecutorService loader = Executors.newSingleThreadExecutor();
     private List<InstalledApp> installedApps = Collections.emptyList();
@@ -41,15 +57,22 @@ public final class MainActivity extends Activity {
     private RuleAdapter adapter;
     private EditText search;
     private TextView empty;
+    private RadioGroup tabs;
+    private boolean showSystemApps;
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         rules = new RuleStore(this);
+        SharedPreferences display = getSharedPreferences("display_settings", MODE_PRIVATE);
+        showSystemApps = display.getBoolean(SHOW_SYSTEM_APPS, true);
         LinearLayout root = column();
         root.setBackgroundColor(Color.WHITE);
         if (Build.VERSION.SDK_INT >= 30) {
             getWindow().setDecorFitsSystemWindows(false);
+            int lightBars = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                    | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+            getWindow().getInsetsController().setSystemBarsAppearance(lightBars, lightBars);
             root.setOnApplyWindowInsetsListener((view, insets) -> {
                 Insets padding = insets.getInsets(WindowInsets.Type.systemBars()
                         | WindowInsets.Type.displayCutout() | WindowInsets.Type.ime());
@@ -60,17 +83,91 @@ public final class MainActivity extends Activity {
             root.setFitsSystemWindows(true);
         }
 
-        TextView title = text(25);
-        title.setText(R.string.app_name);
-        title.setAccessibilityHeading(true);
-        title.setPadding(dp(16), dp(12), dp(16), dp(4));
-        root.addView(title);
+        TextView status = text(24);
+        status.setText(R.string.firewall_off);
+        status.setAccessibilityHeading(true);
+        status.setPadding(dp(16), dp(12), dp(16), dp(8));
+        root.addView(status);
+
+        tabs = new RadioGroup(this);
+        tabs.setOrientation(LinearLayout.HORIZONTAL);
+        tabs.setPadding(dp(8), 0, dp(8), dp(4));
+        tabs.addView(tab(R.id.tab_firewall, R.string.tab_firewall));
+        tabs.addView(tab(R.id.tab_programs, R.string.tab_programs));
+        root.addView(tabs);
+
+        View settings = createSettings(display);
+        View programs = createPrograms(state);
+        root.addView(settings, new LinearLayout.LayoutParams(-1, 0, 1));
+        root.addView(programs, new LinearLayout.LayoutParams(-1, 0, 1));
+
+        tabs.setOnCheckedChangeListener((group, checkedId) -> {
+            boolean showPrograms = checkedId == R.id.tab_programs;
+            if (!showPrograms && search.hasFocus()) {
+                getSystemService(InputMethodManager.class)
+                        .hideSoftInputFromWindow(search.getWindowToken(), 0);
+                search.clearFocus();
+            }
+            settings.setVisibility(showPrograms ? View.GONE : View.VISIBLE);
+            programs.setVisibility(showPrograms ? View.VISIBLE : View.GONE);
+        });
+        tabs.check(state != null && state.getBoolean("programs_tab")
+                ? R.id.tab_programs : R.id.tab_firewall);
+        root.setFocusableInTouchMode(true);
+        setContentView(root);
+        root.requestFocus();
+    }
+
+    private RadioButton tab(int id, int title) {
+        RadioButton tab = new RadioButton(this);
+        tab.setId(id);
+        tab.setText(title);
+        tab.setTextSize(15);
+        tab.setTextColor(getColorStateList(R.color.tab_text));
+        tab.setButtonDrawable((Drawable) null);
+        tab.setBackgroundResource(R.drawable.tab_background);
+        tab.setGravity(Gravity.CENTER);
+        tab.setMinHeight(dp(48));
+        RadioGroup.LayoutParams params = new RadioGroup.LayoutParams(0, -2, 1);
+        params.setMargins(dp(4), 0, dp(4), 0);
+        tab.setLayoutParams(params);
+        return tab;
+    }
+
+    private View createSettings(SharedPreferences display) {
+        ScrollView scroll = new ScrollView(this);
+        LinearLayout settings = column();
+        settings.setPadding(dp(16), dp(12), dp(16), dp(16));
+        scroll.addView(settings);
+
+        Button power = new Button(this);
+        power.setText(R.string.enable_firewall);
+        power.setAllCaps(false);
+        power.setEnabled(false);
+        settings.addView(power, new LinearLayout.LayoutParams(-1, -2));
 
         TextView status = text(14);
         status.setText(R.string.configuration_status);
-        status.setPadding(dp(16), 0, dp(16), dp(6));
-        root.addView(status);
+        status.setPadding(0, dp(4), 0, dp(20));
+        settings.addView(status);
 
+        Switch systemApps = new Switch(this);
+        systemApps.setText(R.string.show_system_apps);
+        systemApps.setTextSize(16);
+        systemApps.setMinHeight(dp(48));
+        systemApps.setSwitchPadding(dp(12));
+        systemApps.setChecked(showSystemApps);
+        systemApps.setOnCheckedChangeListener((view, checked) -> {
+            showSystemApps = checked;
+            display.edit().putBoolean(SHOW_SYSTEM_APPS, checked).apply();
+            filterApps(search.getText().toString());
+        });
+        settings.addView(systemApps, new LinearLayout.LayoutParams(-1, -2));
+        return scroll;
+    }
+
+    private View createPrograms(Bundle state) {
+        LinearLayout programs = column();
         search = new EditText(this);
         search.setSingleLine(true);
         search.setHint(R.string.search_apps);
@@ -78,20 +175,21 @@ public final class MainActivity extends Activity {
         if (state != null) search.setText(state.getString("query", ""));
         LinearLayout.LayoutParams searchLayout = new LinearLayout.LayoutParams(-1, -2);
         searchLayout.setMargins(dp(16), 0, dp(16), dp(4));
-        root.addView(search, searchLayout);
-        root.setFocusableInTouchMode(true);
-        root.requestFocus();
+        programs.addView(search, searchLayout);
+        programs.addView(ruleHeader());
 
         ListView list = new ListView(this);
         adapter = new RuleAdapter();
         list.setItemsCanFocus(true);
         list.setAdapter(adapter);
-        root.addView(list, new LinearLayout.LayoutParams(-1, 0, 1));
+        list.setDivider(new ColorDrawable(getColor(R.color.rule_divider)));
+        list.setDividerHeight(dp(1));
+        programs.addView(list, new LinearLayout.LayoutParams(-1, 0, 1));
 
         empty = text(16);
         empty.setGravity(Gravity.CENTER);
         empty.setText(R.string.loading_apps);
-        root.addView(empty, new LinearLayout.LayoutParams(-1, 0, 1));
+        programs.addView(empty, new LinearLayout.LayoutParams(-1, 0, 1));
         list.setEmptyView(empty);
         search.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence value, int start, int count, int after) {}
@@ -100,7 +198,25 @@ public final class MainActivity extends Activity {
             }
             @Override public void afterTextChanged(Editable value) {}
         });
-        setContentView(root);
+        return programs;
+    }
+
+    private View ruleHeader() {
+        LinearLayout header = new LinearLayout(this);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setPaddingRelative(dp(LIST_PADDING), 0, dp(LIST_PADDING), 0);
+        addColumnIcon(header, R.drawable.ic_wifi, R.string.wifi);
+        addColumnIcon(header, R.drawable.ic_mobile, R.string.mobile);
+        addColumnIcon(header, R.drawable.ic_exclusion, R.string.exclude);
+        return header;
+    }
+
+    private void addColumnIcon(LinearLayout header, int icon, int title) {
+        ImageView image = new ImageView(this);
+        image.setImageResource(icon);
+        image.setScaleType(ImageView.ScaleType.CENTER);
+        image.setContentDescription(getString(title));
+        header.addView(image, new LinearLayout.LayoutParams(dp(RULE_COLUMN_WIDTH), dp(36)));
     }
 
     @Override
@@ -120,6 +236,7 @@ public final class MainActivity extends Activity {
     @Override
     protected void onSaveInstanceState(Bundle out) {
         out.putString("query", search.getText().toString());
+        out.putBoolean("programs_tab", tabs.getCheckedRadioButtonId() == R.id.tab_programs);
         super.onSaveInstanceState(out);
     }
 
@@ -138,7 +255,10 @@ public final class MainActivity extends Activity {
         List<InstalledApp> result = new ArrayList<>(applications.size());
         for (ApplicationInfo app : applications) {
             if (getPackageName().equals(app.packageName)) continue;
+            CharSequence description = app.loadDescription(packages);
             result.add(new InstalledApp(app.loadLabel(packages).toString(), app.packageName,
+                    description == null || description.toString().trim().isEmpty()
+                            ? app.packageName : description.toString(),
                     (app.flags & ApplicationInfo.FLAG_SYSTEM) != 0));
         }
         Collator order = Collator.getInstance();
@@ -155,6 +275,7 @@ public final class MainActivity extends Activity {
         String term = query.trim().toLowerCase(Locale.ROOT);
         List<InstalledApp> matches = new ArrayList<>();
         for (InstalledApp app : installedApps) {
+            if (!showSystemApps && app.system()) continue;
             if (app.label().toLowerCase(Locale.ROOT).contains(term)
                     || app.packageName().toLowerCase(Locale.ROOT).contains(term)) {
                 matches.add(app);
@@ -180,39 +301,62 @@ public final class MainActivity extends Activity {
     }
 
     private final class RuleRow {
-        private final LinearLayout root = column();
+        private final LinearLayout root = new LinearLayout(MainActivity.this);
+        private final LinearLayout details = column();
         private final TextView label = text(16);
-        private final TextView packageName = text(12);
-        private final CheckBox wifi = control(R.string.wifi);
-        private final CheckBox mobile = control(R.string.mobile);
-        private final CheckBox excluded = control(R.string.exclude);
+        private final TextView description = text(13);
+        private final CheckBox wifi = control();
+        private final CheckBox mobile = control();
+        private final CheckBox excluded = control();
 
         RuleRow() {
             root.setTag(this);
-            root.setPadding(dp(16), dp(8), dp(16), dp(4));
-            root.addView(label);
-            root.addView(packageName);
-
-            LinearLayout controls = new LinearLayout(MainActivity.this);
+            root.setGravity(Gravity.CENTER_VERTICAL);
+            root.setPaddingRelative(dp(LIST_PADDING), dp(4), dp(LIST_PADDING), dp(4));
             for (CheckBox box : new CheckBox[] {wifi, mobile, excluded}) {
-                controls.addView(box, new LinearLayout.LayoutParams(0, -2, 1));
+                root.addView(box, new LinearLayout.LayoutParams(dp(RULE_COLUMN_WIDTH), -2));
             }
-            root.addView(controls);
+
+            details.setGravity(Gravity.CENTER_VERTICAL);
+            details.setMinimumHeight(dp(52));
+            details.setPadding(dp(12), dp(6), dp(12), dp(6));
+            label.setMaxLines(2);
+            label.setEllipsize(TextUtils.TruncateAt.END);
+            description.setMaxLines(2);
+            description.setEllipsize(TextUtils.TruncateAt.END);
+            description.setTextColor(getColor(R.color.secondary_text));
+            details.addView(label);
+            details.addView(description);
+            root.addView(details, new LinearLayout.LayoutParams(0, -2, 1));
         }
 
         void bind(InstalledApp app) {
             label.setText(app.label());
-            packageName.setText(app.packageName());
+            description.setText(app.description());
             NetworkRules current = rules.read(app.packageName());
             bindNetwork(app, NetworkType.WIFI, wifi, R.string.wifi, current.getWifi(), current.getExcluded());
             bindNetwork(app, NetworkType.MOBILE, mobile, R.string.mobile, current.getMobile(), current.getExcluded());
 
             excluded.setChecked(current.getExcluded());
-            excluded.setContentDescription(app.label() + ", " + getString(R.string.exclude));
+            excluded.setButtonDrawable(current.getExcluded() ? R.drawable.rule_allowed : R.drawable.rule_undecided);
+            excluded.setContentDescription(getString(R.string.app_control, app.label(), getString(R.string.exclude)));
             excluded.setOnClickListener(view -> {
                 rules.setExcluded(app.packageName(), excluded.isChecked());
                 bind(app);
             });
+            details.setBackgroundColor(getColor(ruleBackground(current)));
+        }
+
+        private int ruleBackground(NetworkRules current) {
+            if (current.getExcluded()) return R.color.rule_excluded_background;
+            AccessRule wifiRule = current.getWifi();
+            AccessRule mobileRule = current.getMobile();
+            if (wifiRule == AccessRule.UNDECIDED || mobileRule == AccessRule.UNDECIDED) {
+                return android.R.color.white;
+            }
+            if (wifiRule != mobileRule) return R.color.rule_mixed_background;
+            return wifiRule == AccessRule.ALLOWED
+                    ? R.color.rule_allowed_background : R.color.rule_denied_background;
         }
 
         private void bindNetwork(InstalledApp app, NetworkType network, CheckBox box,
@@ -222,8 +366,15 @@ public final class MainActivity extends Activity {
                 case ALLOWED -> R.string.allowed;
                 case DENIED -> R.string.denied;
             };
-            box.setContentDescription(app.label() + ", " + getString(title) + ", "
-                    + getString(description) + (bypass ? ". " + getString(R.string.excluded_help) : ""));
+            String controlName = getString(R.string.app_control, app.label(), getString(title));
+            String state = bypass
+                    ? getString(R.string.rule_excluded_state, getString(description)) : getString(description);
+            if (Build.VERSION.SDK_INT >= 30) {
+                box.setContentDescription(controlName);
+                box.setStateDescription(state);
+            } else {
+                box.setContentDescription(getString(R.string.app_control, controlName, state));
+            }
             box.setChecked(value == AccessRule.ALLOWED);
             box.setButtonDrawable(switch (value) {
                 case UNDECIDED -> R.drawable.rule_undecided;
@@ -256,10 +407,10 @@ public final class MainActivity extends Activity {
         return value;
     }
 
-    private CheckBox control(int title) {
+    private CheckBox control() {
         CheckBox value = new CheckBox(this);
-        value.setText(title);
-        value.setTextSize(13);
+        value.setButtonTintList(null);
+        value.setPaddingRelative(dp((RULE_COLUMN_WIDTH - 24) / 2), 0, 0, 0);
         value.setMinHeight(dp(48));
         return value;
     }
