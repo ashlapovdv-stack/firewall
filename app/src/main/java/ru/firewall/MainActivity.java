@@ -452,10 +452,9 @@ public final class MainActivity extends Activity {
                             ? app.packageName : description.toString(),
                     (app.flags & ApplicationInfo.FLAG_SYSTEM) != 0));
         }
-        Collator order = Collator.getInstance();
+        Collator order = Collator.getInstance(getResources().getConfiguration().getLocales().get(0));
+        order.setStrength(Collator.SECONDARY);
         result.sort((first, second) -> {
-            int group = Boolean.compare(first.system(), second.system());
-            if (group != 0) return group;
             int label = order.compare(first.label(), second.label());
             return label != 0 ? label : first.packageName().compareTo(second.packageName());
         });
