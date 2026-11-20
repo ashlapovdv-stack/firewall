@@ -2,9 +2,64 @@ import java.io.IOException
 import java.security.GeneralSecurityException
 import java.security.KeyStore
 import java.security.MessageDigest
+import javax.inject.Inject
+import org.gradle.process.ExecOperations
 
 plugins {
     id("com.android.application") version "8.11.2"
+}
+
+
+abstract class BuildFirewallEngine @Inject constructor(private val executor: ExecOperations) : DefaultTask() {
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val sourceDirectory: DirectoryProperty
+
+    @get:Input
+    abstract val ndkPath: Property<String>
+
+    @get:Input
+    abstract val goCommand: Property<String>
+
+    @get:OutputDirectory
+    abstract val jniDirectory: DirectoryProperty
+
+    @TaskAction
+    fun compileEngine() {
+        val os = System.getProperty("os.name").lowercase()
+        val host = when {
+            os.startsWith("windows") -> "windows-x86_64"
+            os.startsWith("mac") -> "darwin-x86_64"
+            else -> "linux-x86_64"
+        }
+        val clang = File(ndkPath.get(), "toolchains/llvm/prebuilt/$host/bin/clang" +
+                if (os.startsWith("windows")) ".exe" else "")
+        if (!clang.isFile) {
+            throw GradleException("Android NDK Clang not found. Set FIREWALL_NDK_HOME to the NDK root.")
+        }
+
+        val outputs = jniDirectory.get().asFile
+        for ((abi, goArch, target) in listOf(
+            Triple("arm64-v8a", "arm64", "aarch64-linux-android29"),
+            Triple("x86_64", "amd64", "x86_64-linux-android29")
+        )) {
+            val temporaryLibrary = temporaryDir.resolve(abi).resolve("libfirewall_vpn.so")
+            temporaryLibrary.parentFile.mkdirs()
+            executor.exec {
+                workingDir(sourceDirectory.get().asFile)
+                environment("GOOS", "android")
+                environment("GOARCH", goArch)
+                environment("CGO_ENABLED", "1")
+                environment("GOTOOLCHAIN", "local")
+                environment("CC", "\"${clang.absolutePath}\"")
+                environment("CGO_CFLAGS", "--target=$target")
+                environment("CGO_LDFLAGS", "--target=$target -Wl,-z,max-page-size=16384")
+                commandLine(goCommand.get(), "build", "-buildvcs=false", "-mod=readonly", "-buildmode=c-shared", "-trimpath",
+                    "-ldflags=-s -w", "-o", temporaryLibrary.absolutePath, ".")
+            }
+            temporaryLibrary.copyTo(outputs.resolve(abi).resolve(temporaryLibrary.name), overwrite = true)
+        }
+    }
 }
 
 // SHA-256 of the signing certificate on Firewall_0.1.0_debug.apk.
@@ -51,13 +106,14 @@ val verifyFirewallSigning by tasks.registering {
 android {
     namespace = "ru.firewall"
     compileSdk = 36
+    ndkVersion = "28.1.13356709"
 
     defaultConfig {
         applicationId = "ru.firewall"
         minSdk = 29
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 3
+        versionName = "0.2.0"
     }
 
     val firewallSigning = signingConfigs.create("firewall") {
@@ -70,10 +126,25 @@ android {
         signingConfig = firewallSigning
     }
 
+    packaging {
+        jniLibs.keepDebugSymbols.add("**/libfirewall_vpn.so")
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+}
+
+val buildFirewallEngine by tasks.registering(BuildFirewallEngine::class) {
+    sourceDirectory.set(rootProject.layout.projectDirectory.dir("vpn-engine"))
+    ndkPath.set(providers.environmentVariable("FIREWALL_NDK_HOME").orElse(
+        androidComponents.sdkComponents.ndkDirectory.map { it.asFile.absolutePath }))
+    goCommand.set(providers.environmentVariable("FIREWALL_GO").orElse("go"))
+}
+
+androidComponents.onVariants { variant ->
+    variant.sources.jniLibs?.addGeneratedSourceDirectory(buildFirewallEngine, BuildFirewallEngine::jniDirectory)
 }
 
 tasks.matching {

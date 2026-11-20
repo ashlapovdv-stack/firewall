@@ -1,6 +1,8 @@
 package ru.firewall;
 
+import android.Manifest;
 import android.app.Activity;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
@@ -8,8 +10,10 @@ import android.graphics.Color;
 import android.graphics.Insets;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
+import android.net.VpnService;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.text.Editable;
 import android.text.TextUtils;
 import android.text.TextWatcher;
@@ -45,6 +49,8 @@ import ru.firewall.policy.NetworkRules;
 import ru.firewall.policy.NetworkType;
 
 public final class MainActivity extends Activity {
+    private static final int VPN_PERMISSION = 21;
+    private static final int NOTIFICATION_PERMISSION = 22;
     private static final int RULE_COLUMN_WIDTH = 48;
     private static final int LIST_PADDING = 12;
     private static final String SHOW_SYSTEM_APPS = "show_system_apps";
@@ -59,11 +65,18 @@ public final class MainActivity extends Activity {
     private TextView empty;
     private RadioGroup tabs;
     private boolean showSystemApps;
+    private TextView firewallStatus;
+    private Button power;
+    private SharedPreferences rulePreferences;
+    private final Runnable statusChanged = this::updateFirewallControls;
+    private final SharedPreferences.OnSharedPreferenceChangeListener rulesChanged
+            = (preferences, key) -> adapter.notifyDataSetChanged();
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         rules = new RuleStore(this);
+        rulePreferences = getSharedPreferences(RuleStore.PREFERENCES, MODE_PRIVATE);
         SharedPreferences display = getSharedPreferences("display_settings", MODE_PRIVATE);
         showSystemApps = display.getBoolean(SHOW_SYSTEM_APPS, true);
         LinearLayout root = column();
@@ -83,11 +96,10 @@ public final class MainActivity extends Activity {
             root.setFitsSystemWindows(true);
         }
 
-        TextView status = text(24);
-        status.setText(R.string.firewall_off);
-        status.setAccessibilityHeading(true);
-        status.setPadding(dp(16), dp(12), dp(16), dp(8));
-        root.addView(status);
+        firewallStatus = text(24);
+        firewallStatus.setAccessibilityHeading(true);
+        firewallStatus.setPadding(dp(16), dp(12), dp(16), dp(8));
+        root.addView(firewallStatus);
 
         tabs = new RadioGroup(this);
         tabs.setOrientation(LinearLayout.HORIZONTAL);
@@ -116,6 +128,66 @@ public final class MainActivity extends Activity {
         root.setFocusableInTouchMode(true);
         setContentView(root);
         root.requestFocus();
+        updateFirewallControls();
+    }
+
+    @Override protected void onStart() {
+        super.onStart();
+        FirewallStatus.addListener(statusChanged);
+        rulePreferences.registerOnSharedPreferenceChangeListener(rulesChanged);
+        updateFirewallControls();
+    }
+
+    @Override protected void onStop() {
+        FirewallStatus.removeListener(statusChanged);
+        rulePreferences.unregisterOnSharedPreferenceChangeListener(rulesChanged);
+        super.onStop();
+    }
+
+    private void updateFirewallControls() {
+        FirewallStatus.State state = FirewallStatus.current();
+        firewallStatus.setText(switch (state) {
+            case OFF -> R.string.firewall_off;
+            case STARTING -> R.string.firewall_starting;
+            case ACTIVE -> R.string.firewall_on;
+            case NO_NETWORK -> R.string.firewall_no_network;
+            case ERROR -> R.string.firewall_error;
+        });
+        boolean enabled = state == FirewallStatus.State.STARTING || state == FirewallStatus.State.ACTIVE
+                || state == FirewallStatus.State.NO_NETWORK || FirewallService.wantsFirewall(this);
+        power.setText(enabled ? R.string.disable_firewall : R.string.enable_firewall);
+        power.setOnClickListener(view -> {
+            if (enabled) FirewallService.requestStop(this);
+            else beginFirewallPermission();
+        });
+    }
+
+    private void beginFirewallPermission() {
+        Intent consent = VpnService.prepare(this);
+        if (consent != null) {
+            startActivityForResult(consent, VPN_PERMISSION);
+        } else {
+            startFirewall();
+        }
+    }
+
+    private void startFirewall() {
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, NOTIFICATION_PERMISSION);
+        } else {
+            FirewallService.requestStart(this);
+        }
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == VPN_PERMISSION && resultCode == RESULT_OK) startFirewall();
+    }
+
+    @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grants) {
+        super.onRequestPermissionsResult(requestCode, permissions, grants);
+        if (requestCode == NOTIFICATION_PERMISSION) FirewallService.requestStart(this);
     }
 
     private RadioButton tab(int id, int title) {
@@ -140,16 +212,20 @@ public final class MainActivity extends Activity {
         settings.setPadding(dp(16), dp(12), dp(16), dp(16));
         scroll.addView(settings);
 
-        Button power = new Button(this);
-        power.setText(R.string.enable_firewall);
+        power = new Button(this);
         power.setAllCaps(false);
-        power.setEnabled(false);
         settings.addView(power, new LinearLayout.LayoutParams(-1, -2));
 
-        TextView status = text(14);
-        status.setText(R.string.configuration_status);
-        status.setPadding(0, dp(4), 0, dp(20));
-        settings.addView(status);
+        Button vpnSettings = new Button(this);
+        vpnSettings.setText(R.string.vpn_settings);
+        vpnSettings.setAllCaps(false);
+        vpnSettings.setOnClickListener(view -> startActivity(new Intent(Settings.ACTION_VPN_SETTINGS)));
+        settings.addView(vpnSettings, new LinearLayout.LayoutParams(-1, -2));
+
+        TextView help = text(14);
+        help.setText(R.string.vpn_settings_help);
+        help.setPadding(0, dp(4), 0, dp(16));
+        settings.addView(help);
 
         Switch systemApps = new Switch(this);
         systemApps.setText(R.string.show_system_apps);

@@ -8,10 +8,12 @@ import ru.firewall.policy.NetworkRules;
 import ru.firewall.policy.NetworkType;
 
 final class RuleStore {
+    static final String PREFERENCES = "network_rules";
+
     private final SharedPreferences preferences;
 
     RuleStore(Context context) {
-        preferences = context.getSharedPreferences("network_rules", Context.MODE_PRIVATE);
+        preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE);
     }
 
     NetworkRules read(String packageName) {

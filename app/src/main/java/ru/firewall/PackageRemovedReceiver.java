@@ -9,11 +9,11 @@ public final class PackageRemovedReceiver extends BroadcastReceiver {
     @Override
     public void onReceive(Context context, Intent intent) {
         Uri data = intent.getData();
-        if (Intent.ACTION_PACKAGE_FULLY_REMOVED.equals(intent.getAction()) && data != null) {
-            String packageName = data.getSchemeSpecificPart();
-            if (packageName != null && !packageName.isEmpty()) {
-                new RuleStore(context).remove(packageName);
-            }
-        }
+        if (data == null) return;
+        String packageName = data.getSchemeSpecificPart();
+        if (packageName == null || packageName.isEmpty()) return;
+        if (!Intent.ACTION_PACKAGE_FULLY_REMOVED.equals(intent.getAction())) return;
+        new RuleStore(context).remove(packageName);
+        FirewallService.handlePackageChange(packageName);
     }
 }
