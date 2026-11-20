@@ -1,0 +1,14 @@
+<resources>
+    <string name="app_name">Фаервол</string>
+    <string name="configuration_status">Настройка правил. Фильтрация трафика ещё не подключена.</string>
+    <string name="search_apps">Поиск приложений</string>
+    <string name="loading_apps">Загрузка приложений…</string>
+    <string name="no_matching_apps">Приложения не найдены</string>
+    <string name="wifi">Wi-Fi</string>
+    <string name="mobile">Мобильная сеть</string>
+    <string name="exclude">Исключить</string>
+    <string name="excluded_help">Сетевые правила сохраняются при исключении приложения.</string>
+    <string name="undecided">Не активен</string>
+    <string name="allowed">Разрешено</string>
+    <string name="denied">Запрещено</string>
+</resources>
