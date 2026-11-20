@@ -13,12 +13,17 @@
 - После изменений самостоятельно запускай доступные проверки. Для изменений VPN проверяй Android 10 и актуальную версию Android, Wi-Fi и мобильную сеть, IPv4 и IPv6, уведомления, исключения, смену сети и перезагрузку. Для FTP проверяй передачу файла. Отличай локальные проверки от проверок на устройстве.
 - Продолжай самостоятельно в пределах согласованной задачи. При устранимом сбое диагностируй причину, исправляй и повторяй проверку. В отчёте указывай фактический статус сборки и непроверенные сценарии. Готовые APK сохраняй на Google Диск.
 
-## Навыки Android
+## Навыки на GitHub
 
 Перед соответствующей задачей открой и прочитай применимый SKILL.md. Руководствуйся текущим стеком проекта и официальной документацией платформы.
 
 - [testing-setup](https://github.com/android/skills/blob/main/testing/testing-setup/SKILL.md) — настройка проверок и тестов Android.
 - [edge-to-edge](https://github.com/android/skills/blob/main/system/edge-to-edge/SKILL.md) — системные панели и клавиатура при работе с интерфейсом Jetpack Compose.
 - [android-cli](https://github.com/android/skills/blob/main/devtools/android-cli/SKILL.md) — сборка, установка APK и проверки на эмуляторе, когда Android CLI доступен.
+
+- [android-intent-security](https://github.com/android/skills/blob/main/security/android-intent-security/SKILL.md) и [android-permissions-security](https://github.com/android/skills/blob/main/security/android-permissions-security/SKILL.md) — проверяй манифест, доступ к VPN-сервису и действия уведомлений. Внутренние компоненты закрывай для вызовов извне. Для «Разрешить» и «Запретить» используй явные неизменяемые PendingIntent и проверяй, к какому приложению и типу сети относится решение.
+- [gradle-best-practices](https://github.com/gradle/gradle-skills#gradle-best-practices) — при настройке сборки проверяй скрипты, репозитории и зависимости вместе с версией Gradle Wrapper. Закрепляй версии и контрольную сумму дистрибутива Wrapper. После изменений сборки запускай её через Wrapper.
+
+Из testing-setup применяй разделение проверок: матрица правил выполняется на JVM, разрешения VPN, уведомления, смена сети и FTP проверяются на Android. Из edge-to-edge применяй обработку системных отступов и клавиатуры для списка и настроек. Из android-cli используй доступные команды для установки и запуска, затем фиксируй конкретное устройство и результат.
 
 Для сетевых ограничений сверяй [Android VPN guide](https://developer.android.com/develop/connectivity/vpn), [VpnService](https://developer.android.com/reference/android/net/VpnService) и [ConnectivityManager](https://developer.android.com/reference/android/net/ConnectivityManager#getConnectionOwnerUid(int,%20java.net.InetSocketAddress,%20java.net.InetSocketAddress)).
