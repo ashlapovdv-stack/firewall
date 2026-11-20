@@ -62,8 +62,8 @@ abstract class BuildFirewallEngine @Inject constructor(private val executor: Exe
     }
 }
 
-// SHA-256 of the signing certificate on Firewall_0.1.0_debug.apk.
-val expectedCertificateSha256 = "4854a78d51db54d4ccb43eb33d1642718fc591288c20d255b57c9c91a6077f69"
+// SHA-256 of the distribution certificate introduced in Firewall 0.2.1.
+val expectedCertificateSha256 = "c86924bd6ee0509b8b3efd27e4506e8bbba2292887545461f5b95dc7fafb68eb"
 
 val signingStore = providers.environmentVariable("FIREWALL_SIGNING_STORE_FILE").orNull?.let(rootProject::file)
 val signingStorePassword = providers.environmentVariable("FIREWALL_SIGNING_STORE_PASSWORD").orNull
@@ -98,7 +98,7 @@ val verifyFirewallSigning by tasks.registering {
         val fingerprint = MessageDigest.getInstance("SHA-256").digest(entry.certificate.encoded)
         val certificateSha256 = fingerprint.joinToString("") { "%02x".format(it) }
         if (certificateSha256 != expectedCertificateSha256) {
-            throw GradleException("Wrong Firewall signing certificate (SHA-256: $certificateSha256). Use the key for version 0.1.0.")
+            throw GradleException("Wrong Firewall signing certificate (SHA-256: $certificateSha256). Use the persistent Firewall distribution key.")
         }
     }
 }
@@ -112,8 +112,8 @@ android {
         applicationId = "ru.firewall"
         minSdk = 29
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.2.0"
+        versionCode = 4
+        versionName = "0.2.1"
     }
 
     val firewallSigning = signingConfigs.create("firewall") {
@@ -155,4 +155,5 @@ tasks.matching {
 
 dependencies {
     implementation(project(":policy"))
+    testImplementation("junit:junit:4.13.2")
 }

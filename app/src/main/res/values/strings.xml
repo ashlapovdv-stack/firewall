@@ -28,4 +28,22 @@
     <string name="undecided">Не активен</string>
     <string name="allowed">Разрешено</string>
     <string name="denied">Запрещено</string>
+    <string name="ftp_settings">Домашний FTP</string>
+    <string name="ftp_enabled">Включить FTP-прокси</string>
+    <string name="ftp_ssid">Точное имя домашней сети Wi-Fi</string>
+    <string name="ftp_subnet">Подсеть клиентов, например 192.168.1.0/24</string>
+    <string name="ftp_external_port">Порт для подключения клиента</string>
+    <string name="ftp_data_range">Порты данных прокси (до 32)</string>
+    <string name="ftp_server_port">Порт FTP-сервера «Проводника»</string>
+    <string name="ftp_server_data_range">Диапазон пассивных портов «Проводника»</string>
+    <string name="ftp_grant_location">Разрешение на определение сети Wi-Fi</string>
+    <string name="ftp_save">Сохранить</string>
+    <string name="ftp_settings_help">Оставьте сервер «Проводника» включённым. В FTP-клиенте укажите адрес телефона и порт прокси, включите пассивный режим. Чтобы узнавать домашнюю сеть в фоне, разрешите точную геолокацию всегда. Она нужна для проверки имени Wi-Fi.</string>
+    <string name="ftp_off">FTP-прокси выключен</string>
+    <string name="ftp_invalid">Проверьте имя сети, подсеть и диапазоны портов. Диапазоны и отдельные порты должны быть разными.</string>
+    <string name="ftp_location_needed">Для домашнего FTP разрешите точную геолокацию всегда и включите её в Android.</string>
+    <string name="ftp_waiting_home">FTP-прокси ждёт выбранную сеть Wi-Fi</string>
+    <string name="ftp_waiting_address">FTP-прокси ждёт IPv4-адрес телефона</string>
+    <string name="ftp_bind_failed">Порт FTP-прокси недоступен. Проверьте, свободен ли он.</string>
+    <string name="ftp_active">Адрес FTP-прокси %1$s:%2$d</string>
 </resources>

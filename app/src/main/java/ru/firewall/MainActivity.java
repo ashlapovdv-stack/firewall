@@ -2,6 +2,7 @@ package ru.firewall;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
@@ -10,11 +11,13 @@ import android.graphics.Color;
 import android.graphics.Insets;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
+import android.net.Uri;
 import android.net.VpnService;
 import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.text.Editable;
+import android.text.InputType;
 import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.view.Gravity;
@@ -35,6 +38,7 @@ import android.widget.RadioGroup;
 import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import java.text.Collator;
 import java.util.ArrayList;
@@ -51,6 +55,8 @@ import ru.firewall.policy.NetworkType;
 public final class MainActivity extends Activity {
     private static final int VPN_PERMISSION = 21;
     private static final int NOTIFICATION_PERMISSION = 22;
+    private static final int FTP_LOCATION_PERMISSION = 23;
+    private static final int FTP_BACKGROUND_PERMISSION = 24;
     private static final int RULE_COLUMN_WIDTH = 48;
     private static final int LIST_PADDING = 12;
     private static final String SHOW_SYSTEM_APPS = "show_system_apps";
@@ -66,6 +72,7 @@ public final class MainActivity extends Activity {
     private RadioGroup tabs;
     private boolean showSystemApps;
     private TextView firewallStatus;
+    private TextView ftpStatus;
     private Button power;
     private SharedPreferences rulePreferences;
     private final Runnable statusChanged = this::updateFirewallControls;
@@ -156,6 +163,12 @@ public final class MainActivity extends Activity {
         boolean enabled = state == FirewallStatus.State.STARTING || state == FirewallStatus.State.ACTIVE
                 || state == FirewallStatus.State.NO_NETWORK || FirewallService.wantsFirewall(this);
         power.setText(enabled ? R.string.disable_firewall : R.string.enable_firewall);
+        String ftpMessage = FirewallStatus.ftp();
+        if (ftpMessage.isEmpty() || state == FirewallStatus.State.OFF) {
+            ftpStatus.setText(R.string.ftp_off);
+        } else {
+            ftpStatus.setText(ftpMessage);
+        }
         power.setOnClickListener(view -> {
             if (enabled) FirewallService.requestStop(this);
             else beginFirewallPermission();
@@ -239,7 +252,109 @@ public final class MainActivity extends Activity {
             filterApps(search.getText().toString());
         });
         settings.addView(systemApps, new LinearLayout.LayoutParams(-1, -2));
+
+        Button ftp = new Button(this);
+        ftp.setText(R.string.ftp_settings);
+        ftp.setAllCaps(false);
+        ftp.setOnClickListener(view -> editFtpSettings());
+        settings.addView(ftp, new LinearLayout.LayoutParams(-1, -2));
+
+        ftpStatus = text(14);
+        settings.addView(ftpStatus);
         return scroll;
+    }
+
+    private void editFtpSettings() {
+        SharedPreferences saved = FtpSettings.preferences(this);
+        LinearLayout form = column();
+        form.setPadding(dp(24), dp(8), dp(24), dp(8));
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(form);
+
+        Switch enabled = new Switch(this);
+        enabled.setText(R.string.ftp_enabled);
+        enabled.setMinHeight(dp(48));
+        enabled.setChecked(saved.getBoolean("enabled", false));
+        form.addView(enabled, new LinearLayout.LayoutParams(-1, -2));
+        EditText ssid = ftpField(form, R.string.ftp_ssid, saved.getString("ssid", ""), InputType.TYPE_CLASS_TEXT);
+        EditText subnet = ftpField(form, R.string.ftp_subnet, saved.getString("subnet", ""), InputType.TYPE_CLASS_TEXT);
+        EditText port = ftpField(form, R.string.ftp_external_port,
+                saved.getString("port", String.valueOf(FtpSettings.DEFAULT_PORT)), InputType.TYPE_CLASS_NUMBER);
+        EditText data = ftpField(form, R.string.ftp_data_range,
+                saved.getString("data", FtpSettings.DEFAULT_DATA), InputType.TYPE_CLASS_TEXT);
+        EditText serverPort = ftpField(form, R.string.ftp_server_port,
+                saved.getString("server_port", String.valueOf(FtpSettings.DEFAULT_SERVER_PORT)), InputType.TYPE_CLASS_NUMBER);
+        EditText serverData = ftpField(form, R.string.ftp_server_data_range,
+                saved.getString("server_data", FtpSettings.DEFAULT_SERVER_DATA), InputType.TYPE_CLASS_TEXT);
+
+        TextView help = text(14);
+        help.setText(R.string.ftp_settings_help);
+        help.setPadding(0, dp(12), 0, dp(8));
+        form.addView(help);
+        Button permission = new Button(this);
+        permission.setAllCaps(false);
+        permission.setText(R.string.ftp_grant_location);
+        permission.setOnClickListener(view -> requestFtpLocation());
+        form.addView(permission, new LinearLayout.LayoutParams(-1, -2));
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle(R.string.ftp_settings)
+                .setView(scroll)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.ftp_save, null)
+                .create();
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(view -> {
+            String wifi = ssid.getText().toString();
+            String cidr = subnet.getText().toString();
+            String listen = port.getText().toString();
+            String listenData = data.getText().toString();
+            String backend = serverPort.getText().toString();
+            String backendData = serverData.getText().toString();
+            if (enabled.isChecked()) {
+                try {
+                    FtpSettings.parse(wifi, cidr, listen, listenData, backend, backendData);
+                } catch (IllegalArgumentException invalid) {
+                    Toast.makeText(this, R.string.ftp_invalid, Toast.LENGTH_LONG).show();
+                    return;
+                }
+            }
+            saved.edit().putBoolean("enabled", enabled.isChecked()).putString("ssid", wifi)
+                    .putString("subnet", cidr).putString("port", listen).putString("data", listenData)
+                    .putString("server_port", backend).putString("server_data", backendData).apply();
+            dialog.dismiss();
+        }));
+        dialog.show();
+    }
+
+    private EditText ftpField(LinearLayout form, int title, String value, int inputType) {
+        TextView label = text(13);
+        label.setText(title);
+        form.addView(label);
+        EditText editor = new EditText(this);
+        editor.setId(View.generateViewId());
+        editor.setInputType(inputType);
+        editor.setSingleLine(true);
+        editor.setText(value);
+        label.setLabelFor(editor.getId());
+        form.addView(editor, new LinearLayout.LayoutParams(-1, -2));
+        return editor;
+    }
+
+    private void requestFtpLocation() {
+        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION}, FTP_LOCATION_PERMISSION);
+        } else if (checkSelfPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                != PackageManager.PERMISSION_GRANTED) {
+            if (Build.VERSION.SDK_INT == 29) {
+                requestPermissions(new String[]{Manifest.permission.ACCESS_BACKGROUND_LOCATION},
+                        FTP_BACKGROUND_PERMISSION);
+            } else {
+                startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.fromParts("package", getPackageName(), null)));
+            }
+        } else if (!HomeFtp.canReadSsid(this)) {
+            startActivity(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS));
+        }
     }
 
     private View createPrograms(Bundle state) {

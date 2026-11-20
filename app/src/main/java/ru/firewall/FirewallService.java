@@ -72,15 +72,38 @@ public final class FirewallService extends VpnService {
             }
         }
     };
-    private final ConnectivityManager.NetworkCallback networkChange = new ConnectivityManager.NetworkCallback() {
+    private final SharedPreferences.OnSharedPreferenceChangeListener ftpChange =
+            (prefs, key) -> scheduleFtpRefresh();
+    private final Runnable ftpCheck = this::refreshFtp;
+
+    private final class DefaultNetworkCallback extends ConnectivityManager.NetworkCallback {
+        DefaultNetworkCallback() { super(); }
+
+        @android.annotation.TargetApi(31)
+        DefaultNetworkCallback(int flags) { super(flags); }
+
         @Override public void onAvailable(Network network) { queueRebuild(); }
-        @Override public void onLost(Network network) { queueRebuild(); }
-        @Override public void onCapabilitiesChanged(Network network, NetworkCapabilities caps) { queueRebuild(); }
-        @Override public void onLinkPropertiesChanged(Network network, LinkProperties properties) { queueRebuild(); }
-    };
+        @Override public void onLost(Network network) {
+            homeFtp.lost(network);
+            refreshFtp();
+            queueRebuild();
+        }
+        @Override public void onCapabilitiesChanged(Network network, NetworkCapabilities caps) {
+            homeFtp.capabilities(network, caps);
+            refreshFtp();
+            queueRebuild();
+        }
+        @Override public void onLinkPropertiesChanged(Network network, LinkProperties properties) {
+            refreshFtp();
+            queueRebuild();
+        }
+    }
 
     private ConnectivityManager connectivity;
     private NotificationManager notifications;
+    private DefaultNetworkCallback networkChange;
+    private HomeFtp homeFtp;
+    private SharedPreferences ftpPreferences;
     private SharedPreferences rulePreferences;
     private RuleStore rules;
     private HandlerThread workerThread;
@@ -132,6 +155,11 @@ public final class FirewallService extends VpnService {
         connectivity = getSystemService(ConnectivityManager.class);
         notifications = getSystemService(NotificationManager.class);
         rules = new RuleStore(this);
+        homeFtp = new HomeFtp(this);
+        ftpPreferences = FtpSettings.preferences(this);
+        networkChange = Build.VERSION.SDK_INT >= 31
+                ? new DefaultNetworkCallback(ConnectivityManager.NetworkCallback.FLAG_INCLUDE_LOCATION_INFO)
+                : new DefaultNetworkCallback();
         rulePreferences = getSharedPreferences(RuleStore.PREFERENCES, MODE_PRIVATE);
         workerThread = new HandlerThread("firewall-vpn");
         workerThread.start();
@@ -176,6 +204,7 @@ public final class FirewallService extends VpnService {
             running = this;
             settings(this).edit().putBoolean("enabled", true).apply();
             rulePreferences.registerOnSharedPreferenceChangeListener(ruleChange);
+            ftpPreferences.registerOnSharedPreferenceChangeListener(ftpChange);
             connectivity.registerDefaultNetworkCallback(networkChange, worker);
             callbackRegistered = true;
             IntentFilter packages = new IntentFilter(Intent.ACTION_PACKAGE_ADDED);
@@ -188,6 +217,7 @@ public final class FirewallService extends VpnService {
             packageReceiverRegistered = true;
             FirewallStatus.post(FirewallStatus.State.STARTING);
             queueRebuild();
+            worker.post(ftpCheck);
             return START_STICKY;
         } catch (IllegalStateException | SecurityException denied) {
             shutdown(FirewallStatus.State.ERROR);
@@ -199,6 +229,18 @@ public final class FirewallService extends VpnService {
         if (stopping) return;
         worker.removeCallbacks(rebuildTask);
         worker.post(rebuildTask);
+    }
+
+    private void scheduleFtpRefresh() {
+        worker.post(ftpCheck);
+    }
+
+    private void refreshFtp() {
+        if (stopping) return;
+        if (nativeHandle != 0) homeFtp.refresh();
+        else homeFtp.stop();
+        worker.removeCallbacks(ftpCheck);
+        if (homeFtp.configured()) worker.postDelayed(ftpCheck, 5000);
     }
 
     private void rebuild() {
@@ -238,6 +280,7 @@ public final class FirewallService extends VpnService {
             nativeHandle = NativeTunnel.open(device.getFd(), MTU, new FlowPolicy(underlying, type));
             if (nativeHandle == 0) throw new IOException("VPN engine unavailable");
             activeUpstream = selected;
+            refreshFtp();
             report(type == null ? FirewallStatus.State.NO_NETWORK : FirewallStatus.State.ACTIVE,
                     type == null ? R.string.firewall_no_network : R.string.firewall_on);
         } catch (IOException | PackageManager.NameNotFoundException | RuntimeException | LinkageError failure) {
@@ -472,11 +515,13 @@ public final class FirewallService extends VpnService {
         stopping = true;
         if (running == this) running = null;
         rulePreferences.unregisterOnSharedPreferenceChangeListener(ruleChange);
+        ftpPreferences.unregisterOnSharedPreferenceChangeListener(ftpChange);
         if (callbackRegistered) connectivity.unregisterNetworkCallback(networkChange);
         if (packageReceiverRegistered) unregisterReceiver(packagesAdded);
         for (RuleTarget target : new ArrayList<>(prompts.keySet())) clearPrompt(target);
         worker.removeCallbacksAndMessages(null);
         worker.post(() -> {
+            homeFtp.stop();
             closeEngine();
             closeDevice();
             workerThread.quitSafely();

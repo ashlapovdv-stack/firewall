@@ -12,6 +12,7 @@ final class FirewallStatus {
     private static final Handler main = new Handler(Looper.getMainLooper());
     private static final Set<Runnable> listeners = new LinkedHashSet<>();
     private static State state = State.OFF;
+    private static String ftp = "";
 
     private FirewallStatus() {}
 
@@ -25,6 +26,18 @@ final class FirewallStatus {
 
     static State current() {
         return state;
+    }
+
+    static String ftp() {
+        return ftp;
+    }
+
+    static void postFtp(String updated) {
+        main.post(() -> {
+            if (ftp.equals(updated)) return;
+            ftp = updated;
+            for (Runnable listener : listeners) listener.run();
+        });
     }
 
     static void post(State updated) {
